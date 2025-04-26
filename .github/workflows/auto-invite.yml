@@ -12,42 +12,59 @@ jobs:
         run: |
           BODY="${{ github.event.issue.body }}"
           if echo "$BODY" | grep -q "GitHub Username" && echo "$BODY" | grep -q "I agree to follow"; then
-            echo "valid_request=true" >> $GITHUB_OUTPUT
+            echo "valid_request=true" >> $GITHUB_ENV
           else
-            echo "valid_request=false" >> $GITHUB_OUTPUT
+            echo "valid_request=false" >> $GITHUB_ENV
           fi
 
       - name: Extract username
-        if: steps.check.outputs.valid_request == 'true'
+        if: env.valid_request == 'true'
         id: extract
         run: |
-          USERNAME=$(echo "${{ github.event.issue.body }}" | grep -i "GitHub Username" -A 1 | tail -n 1 | xargs)
+          BODY="${{ github.event.issue.body }}"
+          USERNAME=$(echo "$BODY" | sed -n '/GitHub Username/ {n;p;}' | xargs)
+          echo "Extracted USERNAME: $USERNAME"
+          echo "USERNAME=$USERNAME" >> $GITHUB_ENV
           echo "username=$USERNAME" >> $GITHUB_OUTPUT
 
-      - name: Get GitHub user ID
-        if: steps.check.outputs.valid_request == 'true'
+      - name: Lookup GitHub user ID
+        if: env.valid_request == 'true'
         id: lookup
         run: |
+          echo "Looking up GitHub ID for user: ${{ env.USERNAME }}"
           RESPONSE=$(curl -s -H "Authorization: Bearer ${{ secrets.ORG_RPAPUB_ADMIN_PAT }}" \
                          -H "Accept: application/vnd.github+json" \
-                         https://api.github.com/users/${{ steps.extract.outputs.username }})
+                         https://api.github.com/users/${{ env.USERNAME }})
+
+          echo "GitHub API raw response:"
+          echo "$RESPONSE"
+
           USER_ID=$(echo "$RESPONSE" | jq '.id')
+          if [ "$USER_ID" == "null" ] || [ -z "$USER_ID" ]; then
+            echo "❌ Failed to find GitHub user ID. Exiting."
+            exit 1
+          fi
+
+          echo "Resolved USER_ID: $USER_ID"
+          echo "USER_ID=$USER_ID" >> $GITHUB_ENV
           echo "user_id=$USER_ID" >> $GITHUB_OUTPUT
 
       - name: Invite to Organization
-        if: steps.check.outputs.valid_request == 'true'
+        if: env.valid_request == 'true'
         run: |
+          echo "Inviting USER_ID=${{ env.USER_ID }} to organization."
           curl -X POST \
             -H "Authorization: Bearer ${{ secrets.ORG_RPAPUB_ADMIN_PAT }}" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/orgs/rpapub/invitations \
-            -d '{"invitee_id": ${{ steps.lookup.outputs.user_id }} }'
+            -d "{\"invitee_id\": ${{ env.USER_ID }}}"
 
       - name: Comment back on issue
-        if: steps.check.outputs.valid_request == 'true'
+        if: env.valid_request == 'true'
         run: |
+          echo "Commenting on the issue to notify user."
           curl -X POST \
             -H "Authorization: Bearer ${{ secrets.ORG_RPAPUB_ADMIN_PAT }}" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/comments \
-            -d '{"body":"🎉 Invitation sent to @${{ steps.extract.outputs.username }}! Please accept it to join the organization!"}'
+            -d "{\"body\":\"🎉 Invitation sent to @${{ env.USERNAME }}! Please accept it to join the organization!\"}"
