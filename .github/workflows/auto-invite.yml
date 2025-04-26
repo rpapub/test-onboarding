@@ -6,6 +6,8 @@ on:
 jobs:
   invite:
     runs-on: ubuntu-latest
+    env:
+      TEAM_LIST: "developers,qa-team"  # <--- Set your team list here
     steps:
       - name: Check if issue is valid onboarding request
         id: check
@@ -14,19 +16,20 @@ jobs:
           if echo "$BODY" | grep -q "GitHub Username" && echo "$BODY" | grep -q "I agree to follow"; then
             echo "valid_request=true" >> $GITHUB_ENV
           else
+            echo "::error ::Issue missing required fields. Exiting."
             echo "valid_request=false" >> $GITHUB_ENV
           fi
 
-      - name: Extract username
+      - name: Extract GitHub Username
         if: env.valid_request == 'true'
         id: extract
         run: |
-          echo "Extracting GitHub Username from issue body..."
+          echo "Extracting GitHub Username..."
           BODY="${{ github.event.issue.body }}"
           USERNAME=$(echo "$BODY" | awk '/### GitHub Username/ {flag=1; next} flag && NF {print; exit}' | xargs)
 
           if [ -z "$USERNAME" ]; then
-            echo "❌ No username found. Exiting."
+            echo "::error ::No username found after parsing. Exiting."
             exit 1
           fi
 
@@ -38,7 +41,7 @@ jobs:
         if: env.valid_request == 'true'
         id: lookup
         run: |
-          echo "Looking up GitHub ID for user: ${{ env.USERNAME }}"
+          echo "Looking up GitHub ID for ${{ env.USERNAME }}"
           RESPONSE=$(curl -s -H "Authorization: Bearer ${{ secrets.ORG_RPAPUB_ADMIN_PAT }}" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/users/${{ env.USERNAME }})
@@ -46,7 +49,7 @@ jobs:
           USER_ID=$(echo "$RESPONSE" | jq '.id // empty')
 
           if [ -z "$USER_ID" ]; then
-            echo "❌ GitHub user not found. Exiting."
+            echo "::error ::GitHub user not found. Exiting."
             exit 1
           fi
 
@@ -54,35 +57,92 @@ jobs:
           echo "USER_ID=$USER_ID" >> $GITHUB_ENV
           echo "user_id=$USER_ID" >> $GITHUB_OUTPUT
 
-      - name: Check if user already a member
+      - name: Check org and team memberships
         if: env.valid_request == 'true'
-        id: check_member
+        id: check_membership
         run: |
-          IS_MEMBER=$(curl -s -o /dev/null -w "%{http_code}" \
+          echo "Checking if @${{ env.USERNAME }} is already fully onboarded..."
+
+          ORG_MEMBER=$(curl -s -o /dev/null -w "%{http_code}" \
             -H "Authorization: Bearer ${{ secrets.ORG_RPAPUB_ADMIN_PAT }}" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/orgs/rpapub/members/${{ env.USERNAME }})
 
-          if [ "$IS_MEMBER" -eq 204 ]; then
-            echo "✅ User already a member, skipping invite."
-            echo "already_member=true" >> $GITHUB_ENV
+          ALL_TEAMS_OK=true
+
+          IFS=',' read -ra TEAMS <<< "$TEAM_LIST"
+          for TEAM in "${TEAMS[@]}"; do
+            TEAM=$(echo "$TEAM" | xargs)
+            TEAM_MEMBER=$(curl -s -o /dev/null -w "%{http_code}" \
+              -H "Authorization: Bearer ${{ secrets.ORG_RPAPUB_ADMIN_PAT }}" \
+              -H "Accept: application/vnd.github+json" \
+              https://api.github.com/orgs/rpapub/teams/${TEAM}/memberships/${{ env.USERNAME }})
+
+            if [ "$TEAM_MEMBER" -ne 200 ]; then
+              echo "❌ Not in team: $TEAM"
+              ALL_TEAMS_OK=false
+            else
+              echo "✅ Already in team: $TEAM"
+            fi
+          done
+
+          if [ "$ORG_MEMBER" -eq 204 ] && [ "$ALL_TEAMS_OK" == "true" ]; then
+            echo "✅ Fully onboarded (org + all teams)."
+            echo "already_fully_member=true" >> $GITHUB_ENV
           else
-            echo "Inviting USER_ID=${{ env.USER_ID }} to organization."
+            echo "🚧 Needs onboarding (invite and/or team additions)."
+            echo "already_fully_member=false" >> $GITHUB_ENV
+          fi
+
+      - name: Invite to organization
+        if: env.valid_request == 'true' && env.already_fully_member == 'false'
+        run: |
+          ORG_MEMBER=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Authorization: Bearer ${{ secrets.ORG_RPAPUB_ADMIN_PAT }}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/orgs/rpapub/members/${{ env.USERNAME }})
+
+          if [ "$ORG_MEMBER" -ne 204 ]; then
+            echo "Inviting USER_ID=${{ env.USER_ID }} to organization..."
             curl -X POST \
               -H "Authorization: Bearer ${{ secrets.ORG_RPAPUB_ADMIN_PAT }}" \
               -H "Accept: application/vnd.github+json" \
               https://api.github.com/orgs/rpapub/invitations \
               -d "{\"invitee_id\": ${{ env.USER_ID }}}"
-            echo "already_member=false" >> $GITHUB_ENV
+          else
+            echo "Already in organization."
           fi
+
+      - name: Add to teams
+        if: env.valid_request == 'true' && env.already_fully_member == 'false'
+        run: |
+          echo "Adding @${{ env.USERNAME }} to required teams..."
+          IFS=',' read -ra TEAMS <<< "$TEAM_LIST"
+          for TEAM in "${TEAMS[@]}"; do
+            TEAM=$(echo "$TEAM" | xargs)
+            TEAM_MEMBER=$(curl -s -o /dev/null -w "%{http_code}" \
+              -H "Authorization: Bearer ${{ secrets.ORG_RPAPUB_ADMIN_PAT }}" \
+              -H "Accept: application/vnd.github+json" \
+              https://api.github.com/orgs/rpapub/teams/${TEAM}/memberships/${{ env.USERNAME }})
+
+            if [ "$TEAM_MEMBER" -ne 200 ]; then
+              echo "Adding to team: $TEAM"
+              curl -X PUT \
+                -H "Authorization: Bearer ${{ secrets.ORG_RPAPUB_ADMIN_PAT }}" \
+                -H "Accept: application/vnd.github+json" \
+                https://api.github.com/orgs/rpapub/teams/${TEAM}/memberships/${{ env.USERNAME }}
+            else
+              echo "Already in team: $TEAM"
+            fi
+          done
 
       - name: Comment back on issue
         if: env.valid_request == 'true'
         run: |
-          if [ "${{ env.already_member }}" == "true" ]; then
-            COMMENT_BODY="✅ @${{ env.USERNAME }} is already a member of the organization!"
+          if [ "${{ env.already_fully_member }}" == "true" ]; then
+            COMMENT_BODY="✅ @${{ env.USERNAME }} is already a full member (organization + teams)!"
           else
-            COMMENT_BODY="🎉 Invitation sent to @${{ env.USERNAME }}! Please accept it to join the organization!"
+            COMMENT_BODY="🎉 @${{ env.USERNAME }} has been invited and added to required teams! Welcome aboard!"
           fi
 
           curl -X POST \
