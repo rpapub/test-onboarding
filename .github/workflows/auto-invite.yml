@@ -21,9 +21,16 @@ jobs:
         if: env.valid_request == 'true'
         id: extract
         run: |
+          echo "Extracting GitHub Username from issue body..."
           BODY="${{ github.event.issue.body }}"
-          USERNAME=$(echo "$BODY" | sed -n '/GitHub Username/ {n;p;}' | xargs)
-          echo "Extracted USERNAME: $USERNAME"
+          echo "$BODY"
+          USERNAME=$(echo "$BODY" | awk '/GitHub Username/ {getline; print}' | xargs)
+          echo "Extracted username: $USERNAME"
+          if [ -z "$USERNAME" ]; then
+            echo "❌ Username extraction failed. Exiting."
+            exit 1
+          fi
+          echo "$USERNAME"
           echo "USERNAME=$USERNAME" >> $GITHUB_ENV
           echo "username=$USERNAME" >> $GITHUB_OUTPUT
 
