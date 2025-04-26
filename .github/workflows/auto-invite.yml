@@ -24,7 +24,7 @@ jobs:
           echo "Extracting GitHub Username from issue body..."
           BODY="${{ github.event.issue.body }}"
           echo "$BODY"
-          USERNAME=$(echo "$BODY" | sed -n '/### GitHub Username/{n; s/^[[:space:]]*//; p;}' | xargs)
+          USERNAME=$(echo "$BODY" | awk '/### GitHub Username/ {flag=1; next} flag && NF {print; exit}' | xargs)
           echo "Extracted username: $USERNAME"
           if [ -z "$USERNAME" ]; then
             echo "❌ Username extraction failed. Exiting."
