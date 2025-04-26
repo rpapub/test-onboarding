@@ -7,20 +7,25 @@ jobs:
   invite:
     runs-on: ubuntu-latest
     steps:
-      - name: Check if issue has onboarding label
-        if: contains(join(github.event.issue.labels.*.name, ','), 'onboarding')
-        id: check_label
-        run: echo "Onboarding label found!"
+      - name: Check if issue is valid onboarding request
+        id: check
+        run: |
+          BODY="${{ github.event.issue.body }}"
+          if echo "$BODY" | grep -q "GitHub Username" && echo "$BODY" | grep -q "I agree to follow"; then
+            echo "valid_request=true" >> $GITHUB_OUTPUT
+          else
+            echo "valid_request=false" >> $GITHUB_OUTPUT
+          fi
 
       - name: Extract username
-        if: steps.check_label.outcome == 'success'
+        if: steps.check.outputs.valid_request == 'true'
         id: extract
         run: |
           USERNAME=$(echo "${{ github.event.issue.body }}" | grep -i "GitHub Username" -A 1 | tail -n 1 | xargs)
           echo "username=$USERNAME" >> $GITHUB_OUTPUT
 
       - name: Invite to Organization
-        if: steps.check_label.outcome == 'success'
+        if: steps.check.outputs.valid_request == 'true'
         run: |
           curl -X PUT \
             -H "Authorization: Bearer ${{ secrets.GH_TOKEN }}" \
@@ -29,7 +34,7 @@ jobs:
             -d '{"role":"member"}'
 
       - name: Add to Team
-        if: steps.check_label.outcome == 'success'
+        if: steps.check.outputs.valid_request == 'true'
         run: |
           curl -X PUT \
             -H "Authorization: Bearer ${{ secrets.GH_TOKEN }}" \
@@ -37,7 +42,7 @@ jobs:
             https://api.github.com/orgs/YOUR_ORG/teams/actiontest/memberships/${{ steps.extract.outputs.username }}
 
       - name: Comment back on issue
-        if: steps.check_label.outcome == 'success'
+        if: steps.check.outputs.valid_request == 'true'
         run: |
           curl -X POST \
             -H "Authorization: Bearer ${{ secrets.GH_TOKEN }}" \
