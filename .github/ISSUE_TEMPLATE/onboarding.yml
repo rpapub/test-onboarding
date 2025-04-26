@@ -1,0 +1,31 @@
+name: Organization Membership Request
+description: Request to join the GitHub organization
+title: "Membership Request: "
+labels:
+  - onboarding
+body:
+  - type: input
+    id: github-username
+    attributes:
+      label: GitHub Username
+      description: "Enter your GitHub username (without the @)"
+      placeholder: "octocat"
+    validations:
+      required: true
+
+  - type: input
+    id: email
+    attributes:
+      label: Email (optional)
+      description: "Enter your email if needed"
+      placeholder: "email@example.com"
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: agreement
+    attributes:
+      label: Agreement
+      options:
+        - label: "I agree to follow the organization's Code of Conduct."
+          required: true
