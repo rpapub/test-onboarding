@@ -30,7 +30,7 @@ jobs:
           curl -X PUT \
             -H "Authorization: Bearer ${{ secrets.ORG_RPAPUB_ADMIN_PAT }}" \
             -H "Accept: application/vnd.github+json" \
-            https://api.github.com/orgs/YOUR_ORG/memberships/${{ steps.extract.outputs.username }} \
+            https://api.github.com/orgs/rpapub/memberships/${{ steps.extract.outputs.username }} \
             -d '{"role":"member"}'
 
       - name: Add to Team
@@ -39,7 +39,7 @@ jobs:
           curl -X PUT \
             -H "Authorization: Bearer ${{ secrets.ORG_RPAPUB_ADMIN_PAT }}" \
             -H "Accept: application/vnd.github+json" \
-            https://api.github.com/orgs/YOUR_ORG/teams/actiontest/memberships/${{ steps.extract.outputs.username }}
+            https://api.github.com/orgs/rpapub/teams/actiontest/memberships/${{ steps.extract.outputs.username }}
 
       - name: Comment back on issue
         if: steps.check.outputs.valid_request == 'true'
