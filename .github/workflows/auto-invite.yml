@@ -1,0 +1,42 @@
+name: Auto-Invite New Member
+on:
+  issues:
+    types: [opened]
+
+jobs:
+  invite:
+    if: github.event.issue.labels.*.name contains 'onboarding'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Extract username
+        id: extract
+        run: |
+          echo "ISSUE_BODY<<EOF" >> $GITHUB_ENV
+          echo "${{ github.event.issue.body }}" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+
+          USERNAME=$(echo "${{ github.event.issue.body }}" | grep -i "GitHub Username" -A 1 | tail -n 1 | xargs)
+          echo "username=$USERNAME" >> $GITHUB_OUTPUT
+
+      - name: Invite to Organization
+        run: |
+          curl -X PUT \\
+            -H "Authorization: Bearer ${{ secrets.GH_TOKEN }}" \\
+            -H "Accept: application/vnd.github+json" \\
+            https://api.github.com/orgs/YOUR_ORG/memberships/${{ steps.extract.outputs.username }} \\
+            -d '{"role":"member"}'
+
+      - name: Add to Team
+        run: |
+          curl -X PUT \\
+            -H "Authorization: Bearer ${{ secrets.GH_TOKEN }}" \\
+            -H "Accept: application/vnd.github+json" \\
+            https://api.github.com/orgs/YOUR_ORG/teams/actiontest/memberships/${{ steps.extract.outputs.username }}
+
+      - name: Comment back on issue
+        run: |
+          curl -X POST \
+            -H "Authorization: Bearer ${{ secrets.GH_TOKEN }}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/comments \
+            -d '{"body":"🎉 Invitation sent to @${{ steps.extract.outputs.username }}! Please check your email or GitHub notifications."}'
