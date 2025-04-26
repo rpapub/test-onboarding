@@ -23,14 +23,14 @@ jobs:
         run: |
           echo "Extracting GitHub Username from issue body..."
           BODY="${{ github.event.issue.body }}"
-          echo "$BODY"
           USERNAME=$(echo "$BODY" | awk '/### GitHub Username/ {flag=1; next} flag && NF {print; exit}' | xargs)
-          echo "Extracted username: $USERNAME"
+
           if [ -z "$USERNAME" ]; then
-            echo "❌ Username extraction failed. Exiting."
+            echo "❌ No username found. Exiting."
             exit 1
           fi
-          echo "$USERNAME"
+
+          echo "Extracted username: $USERNAME"
           echo "USERNAME=$USERNAME" >> $GITHUB_ENV
           echo "username=$USERNAME" >> $GITHUB_OUTPUT
 
@@ -40,15 +40,13 @@ jobs:
         run: |
           echo "Looking up GitHub ID for user: ${{ env.USERNAME }}"
           RESPONSE=$(curl -s -H "Authorization: Bearer ${{ secrets.ORG_RPAPUB_ADMIN_PAT }}" \
-                         -H "Accept: application/vnd.github+json" \
-                         https://api.github.com/users/${{ env.USERNAME }})
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/users/${{ env.USERNAME }})
 
-          echo "GitHub API raw response:"
-          echo "$RESPONSE"
+          USER_ID=$(echo "$RESPONSE" | jq '.id // empty')
 
-          USER_ID=$(echo "$RESPONSE" | jq '.id')
-          if [ "$USER_ID" == "null" ] || [ -z "$USER_ID" ]; then
-            echo "❌ Failed to find GitHub user ID. Exiting."
+          if [ -z "$USER_ID" ]; then
+            echo "❌ GitHub user not found. Exiting."
             exit 1
           fi
 
@@ -56,22 +54,49 @@ jobs:
           echo "USER_ID=$USER_ID" >> $GITHUB_ENV
           echo "user_id=$USER_ID" >> $GITHUB_OUTPUT
 
-      - name: Invite to Organization
+      - name: Check if user already a member
         if: env.valid_request == 'true'
+        id: check_member
         run: |
-          echo "Inviting USER_ID=${{ env.USER_ID }} to organization."
-          curl -X POST \
+          IS_MEMBER=$(curl -s -o /dev/null -w "%{http_code}" \
             -H "Authorization: Bearer ${{ secrets.ORG_RPAPUB_ADMIN_PAT }}" \
             -H "Accept: application/vnd.github+json" \
-            https://api.github.com/orgs/rpapub/invitations \
-            -d "{\"invitee_id\": ${{ env.USER_ID }}}"
+            https://api.github.com/orgs/rpapub/members/${{ env.USERNAME }})
+
+          if [ "$IS_MEMBER" -eq 204 ]; then
+            echo "✅ User already a member, skipping invite."
+            echo "already_member=true" >> $GITHUB_ENV
+          else
+            echo "Inviting USER_ID=${{ env.USER_ID }} to organization."
+            curl -X POST \
+              -H "Authorization: Bearer ${{ secrets.ORG_RPAPUB_ADMIN_PAT }}" \
+              -H "Accept: application/vnd.github+json" \
+              https://api.github.com/orgs/rpapub/invitations \
+              -d "{\"invitee_id\": ${{ env.USER_ID }}}"
+            echo "already_member=false" >> $GITHUB_ENV
+          fi
 
       - name: Comment back on issue
         if: env.valid_request == 'true'
         run: |
-          echo "Commenting on the issue to notify user."
+          if [ "${{ env.already_member }}" == "true" ]; then
+            COMMENT_BODY="✅ @${{ env.USERNAME }} is already a member of the organization!"
+          else
+            COMMENT_BODY="🎉 Invitation sent to @${{ env.USERNAME }}! Please accept it to join the organization!"
+          fi
+
           curl -X POST \
             -H "Authorization: Bearer ${{ secrets.ORG_RPAPUB_ADMIN_PAT }}" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/comments \
-            -d "{\"body\":\"🎉 Invitation sent to @${{ env.USERNAME }}! Please accept it to join the organization!\"}"
+            -d "{\"body\":\"$COMMENT_BODY\"}"
+
+      - name: Close the issue
+        if: env.valid_request == 'true'
+        run: |
+          echo "Closing the issue..."
+          curl -X PATCH \
+            -H "Authorization: Bearer ${{ secrets.ORG_RPAPUB_ADMIN_PAT }}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.issue.number }} \
+            -d '{"state":"closed"}'
