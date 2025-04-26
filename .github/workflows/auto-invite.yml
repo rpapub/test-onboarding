@@ -5,35 +5,39 @@ on:
 
 jobs:
   invite:
-    if: github.event.issue.labels.*.name contains 'onboarding'
     runs-on: ubuntu-latest
     steps:
+      - name: Check if issue has onboarding label
+        if: contains(join(github.event.issue.labels.*.name, ','), 'onboarding')
+        id: check_label
+        run: echo "Onboarding label found!"
+
       - name: Extract username
+        if: steps.check_label.outcome == 'success'
         id: extract
         run: |
-          echo "ISSUE_BODY<<EOF" >> $GITHUB_ENV
-          echo "${{ github.event.issue.body }}" >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
-
           USERNAME=$(echo "${{ github.event.issue.body }}" | grep -i "GitHub Username" -A 1 | tail -n 1 | xargs)
           echo "username=$USERNAME" >> $GITHUB_OUTPUT
 
       - name: Invite to Organization
+        if: steps.check_label.outcome == 'success'
         run: |
-          curl -X PUT \\
-            -H "Authorization: Bearer ${{ secrets.GH_TOKEN }}" \\
-            -H "Accept: application/vnd.github+json" \\
-            https://api.github.com/orgs/YOUR_ORG/memberships/${{ steps.extract.outputs.username }} \\
+          curl -X PUT \
+            -H "Authorization: Bearer ${{ secrets.GH_TOKEN }}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/orgs/YOUR_ORG/memberships/${{ steps.extract.outputs.username }} \
             -d '{"role":"member"}'
 
       - name: Add to Team
+        if: steps.check_label.outcome == 'success'
         run: |
-          curl -X PUT \\
-            -H "Authorization: Bearer ${{ secrets.GH_TOKEN }}" \\
-            -H "Accept: application/vnd.github+json" \\
+          curl -X PUT \
+            -H "Authorization: Bearer ${{ secrets.GH_TOKEN }}" \
+            -H "Accept: application/vnd.github+json" \
             https://api.github.com/orgs/YOUR_ORG/teams/actiontest/memberships/${{ steps.extract.outputs.username }}
 
       - name: Comment back on issue
+        if: steps.check_label.outcome == 'success'
         run: |
           curl -X POST \
             -H "Authorization: Bearer ${{ secrets.GH_TOKEN }}" \
