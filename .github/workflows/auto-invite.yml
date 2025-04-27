@@ -7,7 +7,8 @@ jobs:
   invite:
     runs-on: ubuntu-latest
     env:
-      TEAM_LIST: "developers,qa-team"  # <--- Set your team list here
+      TEAM_LIST: "developers,qa-team"  # <--- set your teams here (slug, not display name)
+
     steps:
       - name: Check if issue is valid onboarding request
         id: check
@@ -24,7 +25,6 @@ jobs:
         if: env.valid_request == 'true'
         id: extract
         run: |
-          echo "Extracting GitHub Username..."
           BODY="${{ github.event.issue.body }}"
           USERNAME=$(echo "$BODY" | awk '/### GitHub Username/ {flag=1; next} flag && NF {print; exit}' | xargs)
 
@@ -33,7 +33,6 @@ jobs:
             exit 1
           fi
 
-          echo "Extracted username: $USERNAME"
           echo "USERNAME=$USERNAME" >> $GITHUB_ENV
           echo "username=$USERNAME" >> $GITHUB_OUTPUT
 
@@ -41,7 +40,6 @@ jobs:
         if: env.valid_request == 'true'
         id: lookup
         run: |
-          echo "Looking up GitHub ID for ${{ env.USERNAME }}"
           RESPONSE=$(curl -s -H "Authorization: Bearer ${{ secrets.ORG_RPAPUB_ADMIN_PAT }}" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/users/${{ env.USERNAME }})
@@ -57,7 +55,7 @@ jobs:
           echo "USER_ID=$USER_ID" >> $GITHUB_ENV
           echo "user_id=$USER_ID" >> $GITHUB_OUTPUT
 
-      - name: Check org and team memberships
+      - name: Check org and team membership
         if: env.valid_request == 'true'
         id: check_membership
         run: |
@@ -87,10 +85,10 @@ jobs:
           done
 
           if [ "$ORG_MEMBER" -eq 204 ] && [ "$ALL_TEAMS_OK" == "true" ]; then
-            echo "✅ Fully onboarded (org + all teams)."
+            echo "✅ Fully onboarded."
             echo "already_fully_member=true" >> $GITHUB_ENV
           else
-            echo "🚧 Needs onboarding (invite and/or team additions)."
+            echo "🚧 Needs onboarding."
             echo "already_fully_member=false" >> $GITHUB_ENV
           fi
 
@@ -115,32 +113,59 @@ jobs:
 
       - name: Add to teams
         if: env.valid_request == 'true' && env.already_fully_member == 'false'
+        id: add_teams
         run: |
+          team_add_failed=false
+
           echo "Adding @${{ env.USERNAME }} to required teams..."
+
           IFS=',' read -ra TEAMS <<< "$TEAM_LIST"
           for TEAM in "${TEAMS[@]}"; do
             TEAM=$(echo "$TEAM" | xargs)
+
+            TEAM_EXISTS=$(curl -s -o /dev/null -w "%{http_code}" \
+              -H "Authorization: Bearer ${{ secrets.ORG_RPAPUB_ADMIN_PAT }}" \
+              -H "Accept: application/vnd.github+json" \
+              https://api.github.com/orgs/rpapub/teams/${TEAM})
+
+            if [ "$TEAM_EXISTS" -ne 200 ]; then
+              echo "::warning ::Team $TEAM does not exist. Skipping."
+              team_add_failed=true
+              continue
+            fi
+
             TEAM_MEMBER=$(curl -s -o /dev/null -w "%{http_code}" \
               -H "Authorization: Bearer ${{ secrets.ORG_RPAPUB_ADMIN_PAT }}" \
               -H "Accept: application/vnd.github+json" \
               https://api.github.com/orgs/rpapub/teams/${TEAM}/memberships/${{ env.USERNAME }})
 
             if [ "$TEAM_MEMBER" -ne 200 ]; then
-              echo "Adding to team: $TEAM"
-              curl -X PUT \
+              ADD_RESPONSE=$(curl -s -w "%{http_code}" -o /dev/null \
+                -X PUT \
                 -H "Authorization: Bearer ${{ secrets.ORG_RPAPUB_ADMIN_PAT }}" \
                 -H "Accept: application/vnd.github+json" \
-                https://api.github.com/orgs/rpapub/teams/${TEAM}/memberships/${{ env.USERNAME }}
+                https://api.github.com/orgs/rpapub/teams/${TEAM}/memberships/${{ env.USERNAME }})
+
+              if [ "$ADD_RESPONSE" -ne 200 ] && [ "$ADD_RESPONSE" -ne 201 ]; then
+                echo "::warning ::Failed to add ${{ env.USERNAME }} to team $TEAM"
+                team_add_failed=true
+              else
+			    echo "Added $TEAM_MEMBER to team: $TEAM"
+              fi
             else
-              echo "Already in team: $TEAM"
+              echo "User $TEAM_MEMBER already in team: $TEAM"
             fi
           done
+
+          echo "team_add_failed=$team_add_failed" >> $GITHUB_ENV
 
       - name: Comment back on issue
         if: env.valid_request == 'true'
         run: |
           if [ "${{ env.already_fully_member }}" == "true" ]; then
             COMMENT_BODY="✅ @${{ env.USERNAME }} is already a full member (organization + teams)!"
+          elif [ "${{ env.team_add_failed }}" == "true" ]; then
+            COMMENT_BODY="⚠️ @${{ env.USERNAME }} was invited, but some team additions failed. Admin will fix manually."
           else
             COMMENT_BODY="🎉 @${{ env.USERNAME }} has been invited and added to required teams! Welcome aboard!"
           fi
@@ -154,9 +179,11 @@ jobs:
       - name: Close the issue
         if: env.valid_request == 'true'
         run: |
-          echo "Closing the issue..."
-          curl -X PATCH \
-            -H "Authorization: Bearer ${{ secrets.ORG_RPAPUB_ADMIN_PAT }}" \
-            -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.issue.number }} \
-            -d '{"state":"closed"}'
+          if [ "${{ env.team_add_failed }}" != "true" ]; then
+            curl -X PATCH \
+              -H "Authorization: Bearer ${{ secrets.ORG_RPAPUB_ADMIN_PAT }}" \
+              -H "Accept: application/vnd.github+json" \
+              https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.issue.number }} \
+              -d '{"state":"closed"}'
+          else
+            echo "Not closing because team additions failed."
