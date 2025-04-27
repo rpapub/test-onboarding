@@ -2,3 +2,4 @@ org_name: "rpapub"
 team_list: "actiontest,actiontest2"
 pat_secret_name: "ORG_RPAPUB_ADMIN_PAT"
 mention_team: "@global-owners"
+failure_label: "invalid"  # optional: leave empty if you don't want labeling
