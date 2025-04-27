@@ -199,3 +199,4 @@ jobs:
               -d '{"state":"closed"}'
           else
             echo "Not closing because team additions failed."
+          fi
