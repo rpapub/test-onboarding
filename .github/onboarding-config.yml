@@ -1,5 +1,5 @@
 org_name: "rpapub"
-team_list: "actiontest,actiontest2"
+team_list: "actiontest,actiontest2,foobar"
 pat_secret_name: "ORG_RPAPUB_ADMIN_PAT"
 mention_team: "@global-owners"
 failure_label: "invalid"
