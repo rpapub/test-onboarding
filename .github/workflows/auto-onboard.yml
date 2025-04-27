@@ -73,7 +73,7 @@ jobs:
         if: env.valid_request == 'true'
         id: check_membership
         run: |
-																			   
+          echo "Checking if @${{ env.USERNAME }} is already fully onboarded..."
 
           ORG_MEMBER=$(curl -s -o /dev/null -w "%{http_code}" \
             -H "Authorization: Bearer ${{ secrets[env.PAT_SECRET_NAME] }}" \
@@ -91,18 +91,18 @@ jobs:
               https://api.github.com/orgs/${{ env.ORG_NAME }}/teams/${TEAM}/memberships/${{ env.USERNAME }})
 
             if [ "$TEAM_MEMBER" -ne 200 ]; then
-										   
+              echo "❌ Not in team: $TEAM"
               ALL_TEAMS_OK=false
-				
-											   
+            else
+              echo "✅ Already in team: $TEAM"
             fi
           done
 
           if [ "$ORG_MEMBER" -eq 204 ] && [ "$ALL_TEAMS_OK" == "true" ]; then
-									   
+            echo "✅ Fully onboarded."
             echo "already_fully_member=true" >> $GITHUB_ENV
           else
-										 
+            echo "🚧 Needs onboarding."
             echo "already_fully_member=false" >> $GITHUB_ENV
           fi
 
@@ -115,14 +115,14 @@ jobs:
             https://api.github.com/orgs/${{ env.ORG_NAME }}/members/${{ env.USERNAME }})
 
           if [ "$ORG_MEMBER" -ne 204 ]; then
-																		 
+            echo "Inviting USER_ID=${{ env.USER_ID }} to organization..."
             curl -X POST \
               -H "Authorization: Bearer ${{ secrets[env.PAT_SECRET_NAME] }}" \
               -H "Accept: application/vnd.github+json" \
               https://api.github.com/orgs/${{ env.ORG_NAME }}/invitations \
               -d "{\"invitee_id\": ${{ env.USER_ID }}}"
-			  
-										   
+          else
+            echo "Already in organization."
           fi
 
       - name: Add to teams
@@ -131,7 +131,7 @@ jobs:
         run: |
           team_add_failed=false
 
-																 
+          echo "Adding @${{ env.USERNAME }} to required teams..."
 
           IFS=',' read -ra TEAMS <<< "${{ env.TEAM_LIST }}"
           for TEAM in "${TEAMS[@]}"; do
