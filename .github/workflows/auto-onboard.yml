@@ -18,11 +18,13 @@ jobs:
           TEAM_LIST=$(yq '.team_list' .github/onboarding-config.yml)
           PAT_SECRET_NAME=$(yq '.pat_secret_name' .github/onboarding-config.yml)
           MENTION_TEAM=$(yq '.mention_team' .github/onboarding-config.yml)
-
+          FAILURE_LABEL=$(yq '.failure_label' .github/onboarding-config.yml)
+          
           echo "ORG_NAME=$ORG_NAME" >> $GITHUB_ENV
           echo "TEAM_LIST=$TEAM_LIST" >> $GITHUB_ENV
           echo "PAT_SECRET_NAME=$PAT_SECRET_NAME" >> $GITHUB_ENV
           echo "MENTION_TEAM=$MENTION_TEAM" >> $GITHUB_ENV
+          echo "FAILURE_LABEL=$FAILURE_LABEL" >> $GITHUB_ENV
 
       - name: Check if issue is valid onboarding request
         id: check
@@ -190,14 +192,15 @@ jobs:
             https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/comments \
             -d "{\"body\":\"$COMMENT_BODY\"}"
 
-      - name: Add invalid label on failure
-        if: env.valid_request == 'true' && env.team_add_failed == 'true'
+      - name: Add failure label if configured
+        if: env.valid_request == 'true' && env.team_add_failed == 'true' && env.FAILURE_LABEL != ''
         run: |
+          echo "Adding failure label '${{ env.FAILURE_LABEL }}'..."
           curl -X POST \
             -H "Authorization: Bearer ${{ secrets[env.PAT_SECRET_NAME] }}" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/labels \
-            -d '{"labels":["invalid"]}'
+            -d "{\"labels\": [\"${{ env.FAILURE_LABEL }}\"]}"
 
       - name: Close the issue
         if: env.valid_request == 'true'
