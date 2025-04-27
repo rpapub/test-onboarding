@@ -17,10 +17,12 @@ jobs:
           ORG_NAME=$(yq '.org_name' .github/onboarding-config.yml)
           TEAM_LIST=$(yq '.team_list' .github/onboarding-config.yml)
           PAT_SECRET_NAME=$(yq '.pat_secret_name' .github/onboarding-config.yml)
+          MENTION_TEAM=$(yq '.mention_team' .github/onboarding-config.yml)
 
           echo "ORG_NAME=$ORG_NAME" >> $GITHUB_ENV
           echo "TEAM_LIST=$TEAM_LIST" >> $GITHUB_ENV
           echo "PAT_SECRET_NAME=$PAT_SECRET_NAME" >> $GITHUB_ENV
+          echo "MENTION_TEAM=$MENTION_TEAM" >> $GITHUB_ENV
 
       - name: Check if issue is valid onboarding request
         id: check
@@ -71,7 +73,7 @@ jobs:
         if: env.valid_request == 'true'
         id: check_membership
         run: |
-          echo "Checking if @${{ env.USERNAME }} is already fully onboarded..."
+																			   
 
           ORG_MEMBER=$(curl -s -o /dev/null -w "%{http_code}" \
             -H "Authorization: Bearer ${{ secrets[env.PAT_SECRET_NAME] }}" \
@@ -89,18 +91,18 @@ jobs:
               https://api.github.com/orgs/${{ env.ORG_NAME }}/teams/${TEAM}/memberships/${{ env.USERNAME }})
 
             if [ "$TEAM_MEMBER" -ne 200 ]; then
-              echo "❌ Not in team: $TEAM"
+										   
               ALL_TEAMS_OK=false
-            else
-              echo "✅ Already in team: $TEAM"
+				
+											   
             fi
           done
 
           if [ "$ORG_MEMBER" -eq 204 ] && [ "$ALL_TEAMS_OK" == "true" ]; then
-            echo "✅ Fully onboarded."
+									   
             echo "already_fully_member=true" >> $GITHUB_ENV
           else
-            echo "🚧 Needs onboarding."
+										 
             echo "already_fully_member=false" >> $GITHUB_ENV
           fi
 
@@ -113,14 +115,14 @@ jobs:
             https://api.github.com/orgs/${{ env.ORG_NAME }}/members/${{ env.USERNAME }})
 
           if [ "$ORG_MEMBER" -ne 204 ]; then
-            echo "Inviting USER_ID=${{ env.USER_ID }} to organization..."
+																		 
             curl -X POST \
               -H "Authorization: Bearer ${{ secrets[env.PAT_SECRET_NAME] }}" \
               -H "Accept: application/vnd.github+json" \
               https://api.github.com/orgs/${{ env.ORG_NAME }}/invitations \
               -d "{\"invitee_id\": ${{ env.USER_ID }}}"
-          else
-            echo "Already in organization."
+			  
+										   
           fi
 
       - name: Add to teams
@@ -129,7 +131,7 @@ jobs:
         run: |
           team_add_failed=false
 
-          echo "Adding @${{ env.USERNAME }} to required teams..."
+																 
 
           IFS=',' read -ra TEAMS <<< "${{ env.TEAM_LIST }}"
           for TEAM in "${TEAMS[@]}"; do
@@ -177,7 +179,7 @@ jobs:
           if [ "${{ env.already_fully_member }}" == "true" ]; then
             COMMENT_BODY="✅ @${{ env.USERNAME }} is already a full member (organization + teams)!"
           elif [ "${{ env.team_add_failed }}" == "true" ]; then
-            COMMENT_BODY="⚠️ @${{ env.USERNAME }} was invited, but some team additions failed. Admin will fix manually."
+            COMMENT_BODY="⚠️ ${{ env.MENTION_TEAM }} Attention needed: @${{ env.USERNAME }} was invited, but some team additions failed."
           else
             COMMENT_BODY="🎉 @${{ env.USERNAME }} has been invited and added to required teams! Welcome aboard!"
           fi
@@ -187,6 +189,15 @@ jobs:
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/comments \
             -d "{\"body\":\"$COMMENT_BODY\"}"
+
+      - name: Add invalid label on failure
+        if: env.valid_request == 'true' && env.team_add_failed == 'true'
+        run: |
+          curl -X POST \
+            -H "Authorization: Bearer ${{ secrets[env.PAT_SECRET_NAME] }}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/labels \
+            -d '{"labels":["invalid"]}'
 
       - name: Close the issue
         if: env.valid_request == 'true'
