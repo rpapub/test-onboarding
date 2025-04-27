@@ -6,10 +6,19 @@ on:
 jobs:
   invite:
     runs-on: ubuntu-latest
-    env:
-      TEAM_LIST: "developers,qa-team"  # <--- set your teams here (slug, not display name)
 
     steps:
+      - name: Load configuration
+        id: load_config
+        run: |
+          ORG_NAME=$(yq '.org_name' .github/workflows/onboarding-config.yml)
+          TEAM_LIST=$(yq '.team_list' .github/workflows/onboarding-config.yml)
+          PAT_SECRET_NAME=$(yq '.pat_secret_name' .github/workflows/onboarding-config.yml)
+
+          echo "ORG_NAME=$ORG_NAME" >> $GITHUB_ENV
+          echo "TEAM_LIST=$TEAM_LIST" >> $GITHUB_ENV
+          echo "PAT_SECRET_NAME=$PAT_SECRET_NAME" >> $GITHUB_ENV
+
       - name: Check if issue is valid onboarding request
         id: check
         run: |
@@ -40,7 +49,7 @@ jobs:
         if: env.valid_request == 'true'
         id: lookup
         run: |
-          RESPONSE=$(curl -s -H "Authorization: Bearer ${{ secrets.ORG_RPAPUB_ADMIN_PAT }}" \
+          RESPONSE=$(curl -s -H "Authorization: Bearer ${{ secrets[env.PAT_SECRET_NAME] }}" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/users/${{ env.USERNAME }})
 
@@ -62,19 +71,19 @@ jobs:
           echo "Checking if @${{ env.USERNAME }} is already fully onboarded..."
 
           ORG_MEMBER=$(curl -s -o /dev/null -w "%{http_code}" \
-            -H "Authorization: Bearer ${{ secrets.ORG_RPAPUB_ADMIN_PAT }}" \
+            -H "Authorization: Bearer ${{ secrets[env.PAT_SECRET_NAME] }}" \
             -H "Accept: application/vnd.github+json" \
-            https://api.github.com/orgs/rpapub/members/${{ env.USERNAME }})
+            https://api.github.com/orgs/${{ env.ORG_NAME }}/members/${{ env.USERNAME }})
 
           ALL_TEAMS_OK=true
 
-          IFS=',' read -ra TEAMS <<< "$TEAM_LIST"
+          IFS=',' read -ra TEAMS <<< "${{ env.TEAM_LIST }}"
           for TEAM in "${TEAMS[@]}"; do
             TEAM=$(echo "$TEAM" | xargs)
             TEAM_MEMBER=$(curl -s -o /dev/null -w "%{http_code}" \
-              -H "Authorization: Bearer ${{ secrets.ORG_RPAPUB_ADMIN_PAT }}" \
+              -H "Authorization: Bearer ${{ secrets[env.PAT_SECRET_NAME] }}" \
               -H "Accept: application/vnd.github+json" \
-              https://api.github.com/orgs/rpapub/teams/${TEAM}/memberships/${{ env.USERNAME }})
+              https://api.github.com/orgs/${{ env.ORG_NAME }}/teams/${TEAM}/memberships/${{ env.USERNAME }})
 
             if [ "$TEAM_MEMBER" -ne 200 ]; then
               echo "❌ Not in team: $TEAM"
@@ -96,16 +105,16 @@ jobs:
         if: env.valid_request == 'true' && env.already_fully_member == 'false'
         run: |
           ORG_MEMBER=$(curl -s -o /dev/null -w "%{http_code}" \
-            -H "Authorization: Bearer ${{ secrets.ORG_RPAPUB_ADMIN_PAT }}" \
+            -H "Authorization: Bearer ${{ secrets[env.PAT_SECRET_NAME] }}" \
             -H "Accept: application/vnd.github+json" \
-            https://api.github.com/orgs/rpapub/members/${{ env.USERNAME }})
+            https://api.github.com/orgs/${{ env.ORG_NAME }}/members/${{ env.USERNAME }})
 
           if [ "$ORG_MEMBER" -ne 204 ]; then
             echo "Inviting USER_ID=${{ env.USER_ID }} to organization..."
             curl -X POST \
-              -H "Authorization: Bearer ${{ secrets.ORG_RPAPUB_ADMIN_PAT }}" \
+              -H "Authorization: Bearer ${{ secrets[env.PAT_SECRET_NAME] }}" \
               -H "Accept: application/vnd.github+json" \
-              https://api.github.com/orgs/rpapub/invitations \
+              https://api.github.com/orgs/${{ env.ORG_NAME }}/invitations \
               -d "{\"invitee_id\": ${{ env.USER_ID }}}"
           else
             echo "Already in organization."
@@ -119,14 +128,14 @@ jobs:
 
           echo "Adding @${{ env.USERNAME }} to required teams..."
 
-          IFS=',' read -ra TEAMS <<< "$TEAM_LIST"
+          IFS=',' read -ra TEAMS <<< "${{ env.TEAM_LIST }}"
           for TEAM in "${TEAMS[@]}"; do
             TEAM=$(echo "$TEAM" | xargs)
 
             TEAM_EXISTS=$(curl -s -o /dev/null -w "%{http_code}" \
-              -H "Authorization: Bearer ${{ secrets.ORG_RPAPUB_ADMIN_PAT }}" \
+              -H "Authorization: Bearer ${{ secrets[env.PAT_SECRET_NAME] }}" \
               -H "Accept: application/vnd.github+json" \
-              https://api.github.com/orgs/rpapub/teams/${TEAM})
+              https://api.github.com/orgs/${{ env.ORG_NAME }}/teams/${TEAM})
 
             if [ "$TEAM_EXISTS" -ne 200 ]; then
               echo "::warning ::Team $TEAM does not exist. Skipping."
@@ -135,25 +144,25 @@ jobs:
             fi
 
             TEAM_MEMBER=$(curl -s -o /dev/null -w "%{http_code}" \
-              -H "Authorization: Bearer ${{ secrets.ORG_RPAPUB_ADMIN_PAT }}" \
+              -H "Authorization: Bearer ${{ secrets[env.PAT_SECRET_NAME] }}" \
               -H "Accept: application/vnd.github+json" \
-              https://api.github.com/orgs/rpapub/teams/${TEAM}/memberships/${{ env.USERNAME }})
+              https://api.github.com/orgs/${{ env.ORG_NAME }}/teams/${TEAM}/memberships/${{ env.USERNAME }})
 
             if [ "$TEAM_MEMBER" -ne 200 ]; then
               ADD_RESPONSE=$(curl -s -w "%{http_code}" -o /dev/null \
                 -X PUT \
-                -H "Authorization: Bearer ${{ secrets.ORG_RPAPUB_ADMIN_PAT }}" \
+                -H "Authorization: Bearer ${{ secrets[env.PAT_SECRET_NAME] }}" \
                 -H "Accept: application/vnd.github+json" \
-                https://api.github.com/orgs/rpapub/teams/${TEAM}/memberships/${{ env.USERNAME }})
+                https://api.github.com/orgs/${{ env.ORG_NAME }}/teams/${TEAM}/memberships/${{ env.USERNAME }})
 
               if [ "$ADD_RESPONSE" -ne 200 ] && [ "$ADD_RESPONSE" -ne 201 ]; then
                 echo "::warning ::Failed to add ${{ env.USERNAME }} to team $TEAM"
                 team_add_failed=true
               else
-			    echo "Added $TEAM_MEMBER to team: $TEAM"
+                echo "Added user to team: $TEAM"
               fi
             else
-              echo "User $TEAM_MEMBER already in team: $TEAM"
+              echo "Already in team: $TEAM"
             fi
           done
 
@@ -171,7 +180,7 @@ jobs:
           fi
 
           curl -X POST \
-            -H "Authorization: Bearer ${{ secrets.ORG_RPAPUB_ADMIN_PAT }}" \
+            -H "Authorization: Bearer ${{ secrets[env.PAT_SECRET_NAME] }}" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/comments \
             -d "{\"body\":\"$COMMENT_BODY\"}"
@@ -181,7 +190,7 @@ jobs:
         run: |
           if [ "${{ env.team_add_failed }}" != "true" ]; then
             curl -X PATCH \
-              -H "Authorization: Bearer ${{ secrets.ORG_RPAPUB_ADMIN_PAT }}" \
+              -H "Authorization: Bearer ${{ secrets[env.PAT_SECRET_NAME] }}" \
               -H "Accept: application/vnd.github+json" \
               https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.issue.number }} \
               -d '{"state":"closed"}'
