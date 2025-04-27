@@ -11,9 +11,9 @@ jobs:
       - name: Load configuration
         id: load_config
         run: |
-          ORG_NAME=$(yq '.org_name' .github/workflows/onboarding-config.yml)
-          TEAM_LIST=$(yq '.team_list' .github/workflows/onboarding-config.yml)
-          PAT_SECRET_NAME=$(yq '.pat_secret_name' .github/workflows/onboarding-config.yml)
+          ORG_NAME=$(yq '.org_name' .github/onboarding-config.yml)
+          TEAM_LIST=$(yq '.team_list' .github/onboarding-config.yml)
+          PAT_SECRET_NAME=$(yq '.pat_secret_name' .github/onboarding-config.yml)
 
           echo "ORG_NAME=$ORG_NAME" >> $GITHUB_ENV
           echo "TEAM_LIST=$TEAM_LIST" >> $GITHUB_ENV
